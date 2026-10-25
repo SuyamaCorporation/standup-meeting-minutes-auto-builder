@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stand-up Minutes Builder</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen py-8 px-4">
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">Stand-up Minutes Builder</h1>
+  <p class="text-gray-500 text-center mb-8">Fill in each team member, then generate formatted minutes</p>
+
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-4">
+        <div>
+          <label for="meeting-date" class="block text-xs font-medium text-gray-500 mb-0.5">Date</label>
+          <input id="meeting-date" type="date"
+            class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+            aria-label="Meeting date">
+        </div>
+        <div>
+          <label for="team-name" class="block text-xs font-medium text-gray-500 mb-0.5">Team Name</label>
+          <input id="team-name" type="text" placeholder="e.g. Platform Team"
+            class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+            oninput="saveDraft()" aria-label="Team name">
+        </div>
+      </div>
+      <button onclick="addMember()" id="add-member-btn"
+        class="px-4 py-2 bg-teal-500 text-white rounded-lg text-sm font-medium hover:bg-teal-600 transition-colors"
+        aria-label="Add team member">
+        + Add Member
+      </button>
+    </div>
+
+    <div class="hidden sm:grid grid-cols-12 gap-3 mb-2 px-1 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+      <div class="col-span-2">Name</div>
+      <div class="col-span-3">Yesterday</div>
+      <div class="col-span-3">Today</div>
+      <div class="col-span-3">Blockers</div>
+      <div class="col-span-1"></div>
+    </div>
+
+    <div id="members-container" class="space-y-3"></div>
+
+    <div id="add-hint" class="hidden mt-3 text-center text-xs text-gray-400">Maximum 10 members reached</div>
+  </div>
+
+  <div class="flex gap-3 mb-6">
+    <button onclick="generateMinutes()"
+      class="flex-1 py-3 bg-teal-500 text-white rounded-xl font-semibold hover:bg-teal-600 transition-colors text-sm">
+      Generate Minutes
+    </button>
+    <button onclick="clearAll()"
+      class="px-5 py-3 bg-white border border-gray-300 text-gray-600 rounded-xl font-medium hover:bg-gray-50 transition-colors text-sm">
+      Clear All
+    </button>
+  </div>
+
+  <div id="output-area" class="hidden bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base font-semibold text-gray-700">Meeting Minutes</h2>
+      <button onclick="copyMinutes()" id="copy-minutes-btn"
+        class="px-3 py-1.5 bg-teal-50 text-teal-600 rounded-lg text-xs font-medium hover:bg-teal-100 transition-colors"
+        aria-label="Copy minutes to clipboard">
+        Copy to clipboard
+      </button>
+    </div>
+    <pre id="minutes-output" class="bg-gray-50 rounded-lg p-4 text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed"></pre>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'standup-minutes-v1';
+let members = [];
+
+function todayISO() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDisplayDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const date = new Date(y, m - 1, d);
+  const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  return days[date.getDay()] + ', ' + months[m - 1] + ' ' + parseInt(d) + ', ' + y;
+}
+
+function init() {
+  document.getElementById('meeting-date').value = todayISO();
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw) {
+    try {
+      const data = JSON.parse(raw);
+      if (data.date) document.getElementById('meeting-date').value = data.date;
+      if (data.teamName) document.getElementById('team-name').value = data.teamName;
+      if (Array.isArray(data.members) && data.members.length > 0) {
+        data.members.forEach(m => addMember(m.name, m.yesterday, m.today, m.blockers));
+        return;
+      }
+    } catch(e) {}
+  }
+  addMember('', '', '', '');
+  addMember('', '', '', '');
+  addMember('', '', '', '');
+}
+
+function addMember(name = '', yesterday = '', today = '', blockers = '') {
+  if (members.length >= 10) return;
+  const id = Date.now() + Math.random();
+  members.push({ id, name, yesterday, today, blockers });
+  renderMembers();
+  if (members.length >= 10) {
+    document.getElementById('add-member-btn').disabled = true;
+    document.getElementById('add-member-btn').classList.add('opacity-50', 'cursor-not-allowed');
+    document.getElementById('add-hint').classList.remove('hidden');
+  }
+}
+
+function removeMember(id) {
+  members = members.filter(m => m.id !== id);
+  renderMembers();
+  document.getElementById('add-member-btn').disabled = false;
+  document.getElementById('add-member-btn').classList.remove('opacity-50', 'cursor-not-allowed');
+  document.getElementById('add-hint').classList.add('hidden');
+}
+
+function renderMembers() {
+  const container = document.getElementById('members-container');
+  container.innerHTML = '';
+  members.forEach((m, i) => {
+    const row = document.createElement('div');
+    row.className = 'grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 items-start bg-gray-50 rounded-xl p-3 sm:p-2 sm:bg-transparent';
+    const nId = 'nm-' + m.id, yId = 'yd-' + m.id, tId = 'td-' + m.id, bId = 'bl-' + m.id;
+    row.innerHTML = `
+      <div class="sm:col-span-2">
+        <label for="${nId}" class="sm:hidden block text-xs font-medium text-gray-500 mb-0.5">Name</label>
+        <input id="${nId}" type="text" placeholder="Name" value="${esc(m.name)}"
+          class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+          oninput="update(${m.id},'name',this.value)" aria-label="Team member ${i+1} name">
+      </div>
+      <div class="sm:col-span-3">
+        <label for="${yId}" class="sm:hidden block text-xs font-medium text-gray-500 mb-0.5">Yesterday</label>
+        <textarea id="${yId}" rows="2" placeholder="What did they do yesterday?"
+          class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none bg-white"
+          oninput="update(${m.id},'yesterday',this.value)" aria-label="Yesterday tasks for member ${i+1}">${esc(m.yesterday)}</textarea>
+      </div>
+      <div class="sm:col-span-3">
+        <label for="${tId}" class="sm:hidden block text-xs font-medium text-gray-500 mb-0.5">Today</label>
+        <textarea id="${tId}" rows="2" placeholder="What will they do today?"
+          class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none bg-white"
+          oninput="update(${m.id},'today',this.value)" aria-label="Today tasks for member ${i+1}">${esc(m.today)}</textarea>
+      </div>
+      <div class="sm:col-span-3">
+        <label for="${bId}" class="sm:hidden block text-xs font-medium text-gray-500 mb-0.5">Blockers</label>
+        <textarea id="${bId}" rows="2" placeholder="Any blockers?"
+          class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 resize-none bg-white"
+          oninput="update(${m.id},'blockers',this.value)" aria-label="Blockers for member ${i+1}">${esc(m.blockers)}</textarea>
+      </div>
+      <div class="sm:col-span-1 flex sm:items-center sm:justify-center sm:pt-1">
+        <button onclick="removeMember(${m.id})" class="text-gray-400 hover:text-red-400 transition-colors text-lg leading-none" aria-label="Remove member ${i+1}">×</button>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function update(id, field, val) {
+  const m = members.find(m => m.id === id);
+  if (m) { m[field] = val; saveDraft(); }
+}
+
+function saveDraft() {
+  const data = {
+    date: document.getElementById('meeting-date').value,
+    teamName: document.getElementById('team-name').value,
+    members: members.map(m => ({ name: m.name, yesterday: m.yesterday, today: m.today, blockers: m.blockers }))
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+document.getElementById('meeting-date').addEventListener('change', saveDraft);
+
+function generateMinutes() {
+  const dateVal = document.getElementById('meeting-date').value;
+  const teamName = document.getElementById('team-name').value.trim() || 'Team';
+  const displayDate = formatDisplayDate(dateVal) || dateVal;
+
+  let md = '# ' + teamName + ' Stand-up — ' + displayDate + '\n\n';
+  md += '---\n\n';
+
+  const active = members.filter(m => m.name.trim());
+  if (active.length === 0) {
+    md += '_No team members added._\n';
+  } else {
+    active.forEach(m => {
+      md += '## ' + m.name.trim() + '\n\n';
+      md += '**Yesterday:** ' + (m.yesterday.trim() || '—') + '\n\n';
+      md += '**Today:** ' + (m.today.trim() || '—') + '\n\n';
+      md += '**Blockers:** ' + (m.blockers.trim() || 'None') + '\n\n';
+      md += '---\n\n';
+    });
+  }
+
+  md += '_Generated ' + new Date().toLocaleString() + '_\n';
+
+  document.getElementById('output-area').classList.remove('hidden');
+  document.getElementById('minutes-output').textContent = md;
+  document.getElementById('output-area').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  saveDraft();
+}
+
+function copyMinutes() {
+  const text = document.getElementById('minutes-output').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copy-minutes-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy to clipboard', 2000);
+  });
+}
+
+function clearAll() {
+  members = [];
+  localStorage.removeItem(STORAGE_KEY);
+  document.getElementById('team-name').value = '';
+  document.getElementById('meeting-date').value = todayISO();
+  document.getElementById('members-container').innerHTML = '';
+  document.getElementById('output-area').classList.add('hidden');
+  document.getElementById('add-member-btn').disabled = false;
+  document.getElementById('add-member-btn').classList.remove('opacity-50', 'cursor-not-allowed');
+  document.getElementById('add-hint').classList.add('hidden');
+  addMember(); addMember(); addMember();
+}
+
+init();
+</script>
+</body>
+</html>
